@@ -3,10 +3,10 @@ os: linux
 files:
   - source: /
     destination: /home/ec2-user/api
-  # - source: /config/nginx/
-  #   destination: /etc/nginx
-  # - source: /config/service/webapp.service
-  #   destination: /etc/systemd/system
+  - source: /config/nginx/
+    destination: /etc/nginx
+  - source: /config/service/webapp.service
+    destination: /etc/systemd/system
 file_exists_behavior: OVERWRITE
 permissions:
   - object: /home/ec2-user
@@ -29,15 +29,15 @@ permissions:
     type:
       - file
 hooks:
+  ApplicationStop:
+    - location: scripts/stop_api
+      timeout: 300
+      runas: ec2-user
   AfterInstall:
     - location: scripts/install_dependencies
       timeout: 600
       runas: ec2-user
   ApplicationStart:
     - location: scripts/start_api
-      timeout: 300
-      runas: ec2-user
-  ApplicationStop:
-    - location: scripts/stop_api
       timeout: 300
       runas: ec2-user

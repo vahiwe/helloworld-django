@@ -12,4 +12,4 @@ fi
 sudo systemctl daemon-reload
 
 # Enable webapp service
-# sudo systemctl enable webapp
+sudo systemctl enable webapp
