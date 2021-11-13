@@ -32,7 +32,7 @@ if [ -d "~/logs" ]
 then
     echo "Log folder exists." 
 else
-    mkdir logs
+    mkdir ~/logs
     echo "Log folder created."
 fi
 
@@ -87,7 +87,6 @@ export LD_LIBRARY_PATH="/usr/local/lib"
 
 # Run python manaagement command
 cd /home/ec2-user/web
-python manage.py collectstatic --noinput
 python manage.py makemigrations
 python manage.py migrate
 
