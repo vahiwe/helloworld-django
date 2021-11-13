@@ -1,0 +1,108 @@
+#!/bin/bash
+echo "Starting API"
+
+# Reload Nginx config
+sudo service nginx reload
+
+# Restart Nginx
+sudo service nginx restart
+
+# Reload systemctl
+sudo systemctl daemon-reload
+
+# Setup virtual environment
+if [ -d "~/venv" ] 
+then
+    echo "Python virtual environment exists." 
+else
+    echo "Creating Python virtual environment."
+    cd ~/
+    python3 -m venv venv
+fi
+
+# Activate virtual environment
+source ~/venv/bin/activate
+
+# Install dependencies
+cd ~/api
+pip install -r requirements.txt
+
+# Create logs directory
+if [ -d "~/logs" ] 
+then
+    echo "Log folder exists." 
+else
+    mkdir logs
+    echo "Log folder created."
+fi
+
+# Enable webapp
+# sudo systemctl enable webapp
+
+# Get Tag Name of EC2 Instance
+TOKEN=`curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600"`
+INSTANCE_ID=`curl -H "X-aws-ec2-metadata-token: $TOKEN" -v http://169.254.169.254/latest/meta-data/instance-id`
+REGION=`curl -H "X-aws-ec2-metadata-token: $TOKEN" -v http://169.254.169.254/latest/meta-data/placement/availability-zone | sed 's/.$//'`
+
+TAG_VALUE=$(aws ec2 describe-tags --region $REGION --filters "Name=resource-id,Values=$INSTANCE_ID" "Name=key,Values='Name'")
+
+if [[ $? -eq 0 ]]; then
+    echo "Tag Value Retrieved successfully"
+    TAG_VALUE=$(echo $TAG_VALUE | jq -r '.Tags[].Value')
+    if [[ -z $TAG_VALUE ]]; then
+        echo "Tag Value is empty"
+        TAG_VALUE="{tagname}"
+    fi
+else
+    echo "Error in retrieving Tag Value"
+    TAG_VALUE="{tagname}"
+fi
+
+
+# Stop webapp service
+# STATUS="$(sudo systemctl is-active webapp.service)"
+# echo "webapp service status: $STATUS"
+# if [ "${STATUS}" = "active" ]; then
+#   sudo systemctl stop webapp.service
+#   echo "Stopped webapp service"  
+# fi
+
+# Check if web folder exists
+if [ -d "/home/ec2-user/web" ]; then
+  sudo rm -rf /home/ec2-user/web
+  echo "Removed web folder"
+fi
+
+cp -rf /home/ec2-user/api /home/ec2-user/web
+
+# Create env file
+if [ -f "/home/ec2-user/env" ]; then
+  echo "Removing env file"
+  sudo rm -rf /home/ec2-user/env
+fi
+
+# Add env variables to env file
+echo "TAG_NAME=${TAG_VALUE}" >> /home/ec2-user/env
+
+# Update Cloudwatch agent config with EC2 Tag Name
+sed -ie "s/{tagname}/$TAG_VALUE/g" /home/ec2-user/api/config/cloudwatch/amazon-cloudwatch-agent.json
+
+# Check if string in file
+if grep -q "{tagname}" /home/ec2-user/api/config/cloudwatch/amazon-cloudwatch-agent.json; then
+  echo "cloudwatch agent not started. Configuration not updated"
+else
+  # start cloudwatch agent
+  if [[ -f "/opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl" ]] && [[ $(sudo /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -m ec2 -a status) != *'"status": "running"'* ]]; then
+      sudo /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -s -c file:/home/ec2-user/api/config/cloudwatch/amazon-cloudwatch-agent.json
+      echo "Cloudwatch started"
+  else
+      echo "cloudwatch agent is not available or running"
+  fi
+fi
+
+# check status of webapp service
+# STATUS="$(sudo systemctl is-active webapp.service)"
+# echo "Status of webapp service: $STATUS"
+
+# Start webapp
+# sudo systemctl start webapp

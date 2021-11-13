@@ -1,0 +1,118 @@
+#!/bin/bash
+
+sudo yum update -y
+
+# Check if Development Tools are installed
+if [[ ! -x "$(command -v gcc)" ]] || [[ ! -x "$(command -v automake)" ]]; then
+    echo "Installing Development Tools"
+    sudo yum groupinstall -y "Development Tools"
+    sudo yum install -y openssl-devel bzip2-devel libffi-devel sqlite-devel
+else
+    echo "Development Tools are already installed"
+fi
+
+# check if sqlite3 is installed
+if [[ ! -x "$(command -v sqlite3)" ]] || [[ $(sqlite3 --version 2>&1 | cut -d " " -f1 | cut -d "." -f1) != "3" ]] || [[ $(sqlite3 --version 2>&1 | cut -d " " -f1 | cut -d "." -f2) != "8" ]]; then
+  echo "sqlite is not installed or version not up to 3.8.0"
+  cd /tmp
+  wget https://www.sqlite.org/2014/sqlite-autoconf-3080301.tar.gz
+  tar zxvf sqlite-autoconf-3080301.tar.gz
+  cd sqlite-autoconf-3080301
+  ./configure
+  make
+  sudo make install
+  sudo mv /bin/sqlite3 /bin/sqlite3.bak
+  sudo mv ./sqlite3 /bin/sqlite3
+else
+  echo "sqlite is installed"
+  sqlite3 --version
+fi
+
+# check if variable is set in .bash_profile
+if [[ -z "$(grep 'export LD_LIBRARY_PATH="/usr/local/lib"' ~/.bash_profile)" ]]; then
+  echo 'export LD_LIBRARY_PATH="/usr/local/lib"' >> ~/.bash_profile
+else
+  echo "LD_LIBRARY_PATH is already set"
+  echo 'export LD_LIBRARY_PATH="/usr/local/lib"'
+fi
+
+# check if epel is installed
+if [[ $(rpm -qa | grep -c "epel-release") -eq 1 ]]; then
+    echo "epel is installed"
+else
+    echo "epel is not installed"
+    sudo amazon-linux-extras install epel
+fi
+
+# check if cloudwatch agent and jq are installed
+if [[ $(rpm -qa | grep -c "amazon-cloudwatch-agent") -eq 1 ]] && [[ $(rpm -qa | grep -c "jq") -eq 1 ]]; then
+    echo "amazon-cloudwatch-agent and jq is installed"
+else
+    echo "amazon-cloudwatch-agent or jq is not installed"
+    sudo yum install -y amazon-cloudwatch-agent jq
+fi
+
+
+# check if nginx is installed
+if [ -x "$(command -v nginx)" ]; then
+  echo 'nginx is already installed'
+else
+  sudo amazon-linux-extras enable nginx1
+  sudo yum install -y nginx
+fi
+
+# check if aws cli version is 2.x
+if [[ ! -x "$(command -v aws)" ]] || [[ $(aws --version 2>&1 | cut -d " " -f1 | cut -d "/" -f2 | cut -d "." -f1) != "2" ]]; then
+    echo "aws-cli version 2.0.0 or higher is required"
+
+    if [ -f "/bin/aws" ] 
+    then
+        sudo rm -rf /bin/aws 
+        echo "aws-cli removed"
+    else
+        echo "aws cli 1 already removed"
+    fi
+
+    cd /tmp
+
+    if [ -d "aws" ] 
+    then
+        echo "aws installation folder already here" 
+    else
+        curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+        unzip -u awscliv2.zip
+        echo "Unzipped aws cli"
+    fi
+
+    if [ -d "/usr/local/aws-cli" ] 
+    then
+        sudo rm -rf /usr/local/aws-cli 
+        echo "aws-cli removed"
+    else
+        echo "aws installation folder already removed"
+    fi
+
+    sudo ./aws/install -b /usr/bin
+
+    echo "aws cli installed"
+
+else
+    echo "aws-cli version 2.0.0 or higher is already installed"
+fi
+
+# check if python3 is installed and version is 3.9.5
+if [[ ! -x "$(command -v python3)" ]] || [[ $(python3 -V 2>&1 | cut -d " " -f2 | cut -d "." -f2) != "9" ]] || [[ $(python3 -V 2>&1 | cut -d " " -f2 | cut -d "." -f3) != "5" ]]; then
+  echo "python3 is not installed or version not up to 3.9.5"
+  cd /tmp
+  sudo wget https://www.python.org/ftp/python/3.9.5/Python-3.9.5.tgz
+  sudo tar zxvf Python-3.9.5.tgz
+  cd Python-3.9.5
+  C_INCLUDE_PATH=/usr/local/include CPLUS_INCLUDE_PATH=/usr/local/include LD_RUN_PATH=/usr/local/lib sudo ./configure --enable-loadable-sqlite-extensions --enable-optimizations
+  C_INCLUDE_PATH=/usr/local/include CPLUS_INCLUDE_PATH=/usr/local/include LD_RUN_PATH=/usr/local/lib sudo make altinstall
+  sudo update-alternatives --install /bin/python3 python3 /usr/local/bin/python3.9 100
+else
+  echo "python3 is installed"
+  python3 -V
+fi
+
+echo "Dependencies installed successfully"

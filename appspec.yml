@@ -1,0 +1,43 @@
+version: 0.0
+os: linux
+files:
+  - source: /
+    destination: /home/ec2-user/api
+  # - source: /config/nginx/
+  #   destination: /etc/nginx
+  # - source: /config/service/webapp.service
+  #   destination: /etc/systemd/system
+file_exists_behavior: OVERWRITE
+permissions:
+  - object: /home/ec2-user
+    pattern: "*pi"
+    mode: 755
+    owner: ec2-user
+    group: ec2-user
+    type:
+      - directory
+  - object: /home/ec2-user/api
+    mode: 755
+    owner: ec2-user
+    group: ec2-user
+    type:
+      - directory
+  - object: /home/ec2-user/api
+    mode: 755
+    owner: ec2-user
+    group: ec2-user
+    type:
+      - file
+hooks:
+  AfterInstall:
+    - location: scripts/install_dependencies
+      timeout: 600
+      runas: ec2-user
+  ApplicationStart:
+    - location: scripts/start_api
+      timeout: 300
+      runas: ec2-user
+  ApplicationStop:
+    - location: scripts/stop_api
+      timeout: 300
+      runas: ec2-user

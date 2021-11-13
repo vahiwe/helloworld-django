@@ -1,0 +1,15 @@
+#!/bin/bash
+echo "Stopping API"
+
+# Check if cloudwatch agent is running
+if [[ -f "/opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl" ]] && [[ $(sudo /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -m ec2 -a status) == *'"status": "running"'* ]]; then
+    sudo /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -m ec2 -a stop
+else
+    echo "cloudwatch agent is not available or stopped"
+fi
+
+# Reload systemctl
+sudo systemctl daemon-reload
+
+# Enable webapp service
+# sudo systemctl enable webapp
