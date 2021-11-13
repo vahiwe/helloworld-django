@@ -83,9 +83,10 @@ fi
 
 
 # Export LD_LIBRARY_PATH for python
-LD_LIBRARY_PATH="/usr/local/lib"
+export LD_LIBRARY_PATH="/usr/local/lib"
 
 # Run python manaagement command
+cd /home/ec2-user/web
 python manage.py collectstatic --noinput
 python manage.py makemigrations
 python manage.py migrate
