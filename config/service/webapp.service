@@ -4,12 +4,7 @@ Description=This is daemon for CTMApp
 [Service]
 User=ec2-user
 Type=simple
-ExecStartPre=source /home/ec2-user/venv/bin/activate
-ExecStart=/bin/sh -c "gunicorn --bind 127.0.0.1:8000 --workers=1 --threads=15 helloworld.wsgi:application run 2>&1 > /home/ec2-user/logs/webapp.log"
-
-ExecStartPost=/bin/sh -c "systemctl show -p MainPID webapp.service | cut -d= -f2 > /var/pids/webapp.pid"
-ExecStopPost=/bin/sh -c "rm -f /var/pids/webapp.pid"
-ExecStopPost=/bin/sh -c ""
+ExecStart=/bin/sh -c "/home/ec2-user/venv/bin/gunicorn --bind 127.0.0.1:8000 --workers=1 --threads=15 helloworld.wsgi:application 2>&1 > /home/ec2-user/logs/webapp.log"
 Restart=always
 
 EnvironmentFile=/home/ec2-user/env

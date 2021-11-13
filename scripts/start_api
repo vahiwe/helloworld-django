@@ -59,10 +59,14 @@ else
     TAG_VALUE="{tagname}"
 fi
 
-
-# Stop webapp service
+# Get Service status
 STATUS="$(sudo systemctl is-active webapp.service)"
 echo "webapp service status: $STATUS"
+
+# Offtime variable
+startTime=${SECONDS}
+
+# Stop webapp service if running
 if [ "${STATUS}" = "active" ]; then
   sudo systemctl stop webapp.service
   echo "Stopped webapp service"  
@@ -82,7 +86,6 @@ if [ -f "/home/ec2-user/env" ]; then
   sudo rm -rf /home/ec2-user/env
 fi
 
-
 # Export LD_LIBRARY_PATH for python
 export LD_LIBRARY_PATH="/usr/local/lib"
 
@@ -94,6 +97,18 @@ python manage.py migrate
 # Add env variables to env file
 echo "TAG_NAME=${TAG_VALUE}" >> /home/ec2-user/env
 echo "LD_LIBRARY_PATH=/usr/local/lib" >> /home/ec2-user/env
+
+# check status of webapp service
+STATUS="$(sudo systemctl is-active webapp.service)"
+echo "Status of webapp service: $STATUS"
+
+# Start webapp
+sudo systemctl start webapp
+
+# Check Offtime
+endTime=${SECONDS}
+diffTime=`expr ${endTime} - ${startTime}`
+echo "Diff Time: [${diffTime}]"
 
 # Update Cloudwatch agent config with EC2 Tag Name
 sed -ie "s/{tagname}/$TAG_VALUE/g" /home/ec2-user/api/config/cloudwatch/amazon-cloudwatch-agent.json
@@ -110,10 +125,3 @@ else
       echo "cloudwatch agent is not available or running"
   fi
 fi
-
-# check status of webapp service
-STATUS="$(sudo systemctl is-active webapp.service)"
-echo "Status of webapp service: $STATUS"
-
-# Start webapp
-sudo systemctl start webapp

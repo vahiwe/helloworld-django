@@ -7,8 +7,8 @@
       "files": {
         "collect_list": [
           {
-            "file_path": "/home/ec2-user/api/webapp.log",
-            "log_group_name": "/aws/ec2/{tagname}/webapp.log",
+            "file_path": "/home/ec2-user/logs/webapp.log",
+            "log_group_name": "/aws/ec2/application/{tagname}/webapp.log",
             "log_stream_name": "{instance_id}"
           }
         ]
