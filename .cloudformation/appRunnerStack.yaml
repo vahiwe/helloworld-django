@@ -1,0 +1,79 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: App Runner Template for WebApp
+
+Parameters:
+  WebAppPort:
+    Type: Number
+    Description: The Port that NodeJS API listening on
+    Default: 80
+  ContainerImage:
+    Type: String
+    Description: container image
+  ImageRepositoryType:
+    Type: String
+    Description: Type of the repository
+    Default: ECR
+
+Conditions:
+  NeedsAccessRole:
+    !Equals [!Ref ImageRepositoryType, 'ECR']
+
+Resources:
+  AccessRole:
+    Type: AWS::IAM::Role
+    Condition: NeedsAccessRole
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2008-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - build.apprunner.amazonaws.com
+            Action: sts:AssumeRole
+  
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSAppRunnerServicePolicyForECRAccess
+
+  InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: tasks.apprunner.amazonaws.com
+            Action: 'sts:AssumeRole'
+
+  WebApp:
+    Type: AWS::AppRunner::Service
+    Properties:
+      ServiceName: WebApp
+      SourceConfiguration:
+        AuthenticationConfiguration: !If
+          - NeedsAccessRole
+          - AccessRoleArn: !GetAtt AccessRole.Arn
+          - !Ref AWS::NoValue
+        AutoDeploymentsEnabled: true
+        ImageRepository:
+          ImageIdentifier: !Ref ContainerImage
+          ImageRepositoryType: !Ref ImageRepositoryType
+          ImageConfiguration:
+            Port: !Ref WebAppPort
+            RuntimeEnvironmentVariables:
+              - Name: Name
+                Value: "WebApp"
+      InstanceConfiguration:
+        Cpu: 1 vCPU
+        Memory: 2 GB
+        
+Outputs:
+  AppRunnerServiceArn:
+    Description: ServiceArn of GitHub
+    Value: !GetAtt WebApp.ServiceArn
+  AppRunnerServiceId:
+    Description: AppRunnerServiceId
+    Value: !GetAtt WebApp.ServiceId
+  AppRunnerServiceUrl:
+    Description: AppRunnerServiceUrl
+    Value: !GetAtt WebApp.ServiceUrl

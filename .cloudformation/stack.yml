@@ -1,0 +1,522 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: 'CodePipeline for Git repository.'
+
+#------------------------
+#   PARAMETERS
+#------------------------
+Parameters:
+  Branch:
+    Description: 'Git branch to pull.'
+    Type: String
+    AllowedPattern: ".+"
+    ConstraintDescription: Must be the name of a branch.
+  CodeStarConnectionARN:
+    Type: String
+    Description: 'CodeStar Connection ARN'
+    AllowedPattern: ".+"
+    ConstraintDescription: Must be the ARN of a CodeStar Connection.
+  RepositoryName:
+    Type: String
+    Description: 'Git Repository Name'
+    AllowedPattern: ".+"
+    ConstraintDescription: Must be the name of a repository.
+  ImageRepositoryName:
+    Type: String
+    Description: 'ECR Repository Name'
+    # must be lowercase
+    AllowedPattern: "[a-z0-9]+"
+    Default: 'testing'
+    ConstraintDescription: Must be the name of a repository. e.g. user/repo
+
+#------------------------
+#   RESOURCES
+#------------------------
+Resources:
+  ArtifactStoreBucket:
+    Type: 'AWS::S3::Bucket'
+
+  ECRepository:
+    Type: 'AWS::ECR::Repository'
+    Properties:
+      RepositoryName: !Sub '${ImageRepositoryName}'
+
+  KMSKey:
+    Type: 'AWS::KMS::Key'
+    Properties:
+      Description: 'git CodePipeline integration, bucket to store ssh keys'
+      KeyPolicy:
+        Version: 2012-10-17
+        Statement:
+          - Sid: Allow access for Key Administrators
+            Effect: Allow
+            Principal:
+              AWS:
+                - !Join
+                  - ''
+                  - - 'arn:aws:iam::'
+                    - !Ref 'AWS::AccountId'
+                    - ':root'
+            Action:
+              - 'kms:Create*'
+              - 'kms:Describe*'
+              - 'kms:Enable*'
+              - 'kms:List*'
+              - 'kms:Put*'
+              - 'kms:Update*'
+              - 'kms:Revoke*'
+              - 'kms:Disable*'
+              - 'kms:Get*'
+              - 'kms:Delete*'
+              - 'kms:ScheduleKeyDeletion'
+              - 'kms:CancelKeyDeletion'
+            Resource: '*'
+          - Sid: Allow use of the key
+            Effect: Allow
+            Principal: '*'
+            Action:
+              - 'kms:Encrypt'
+              - 'kms:Decrypt'
+              - 'kms:ReEncrypt*'
+              - 'kms:GenerateDataKey*'
+              - 'kms:DescribeKey'
+            Resource: '*'
+
+  ArtifactStoreBucketCustomResource:
+    Type: Custom::S3CustomResource
+    Properties:
+      ServiceToken: !GetAtt AWSLambdaFunctionToClearBucketOnDelete.Arn
+      the_bucket: !Ref ArtifactStoreBucket
+
+  AWSLambdaFunctionToClearBucketOnDelete:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      Description: "Work with S3 Buckets!"
+      FunctionName: !Sub "${ArtifactStoreBucket}-clear-bucket"
+      Handler: index.handler
+      Role: !GetAtt AWSLambdaExecutionRole.Arn
+      Timeout: 360
+      Runtime: python3.9
+      Code:
+        ZipFile: |
+          import boto3
+          import cfnresponse
+          def handler(event, context):
+              # Init ...
+              the_event = event['RequestType']
+              print("The event is: ", str(the_event))
+              response_data = {}
+              s_3 = boto3.client('s3')
+              # Retrieve parameters
+              the_bucket = event['ResourceProperties']['the_bucket']
+              try:
+                  if the_event in ('Create', 'Update'):
+                      print("Bucket Event for creation or update ", the_event)
+                  elif the_event == 'Delete':
+                      print("Deleting S3 content...")
+                      b_operator = boto3.resource('s3')
+                      b_operator.Bucket(str(the_bucket)).objects.all().delete()
+                  # Everything OK... send the signal back
+                  print("Operation successful!")
+                  cfnresponse.send(event,
+                                   context,
+                                   cfnresponse.SUCCESS,
+                                   response_data)
+              except Exception as e:
+                  print("Operation failed...")
+                  print(str(e))
+                  response_data['Data'] = str(e)
+                  cfnresponse.send(event,
+                                   context,
+                                   cfnresponse.FAILED,
+                                   response_data)
+
+  AWSLambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action:
+              - sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+        Version: '2012-10-17'
+      Path: "/"
+      Policies:
+        - PolicyDocument:
+            Statement:
+              - Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Effect: Allow
+                Resource: arn:aws:logs:*:*:*
+            Version: '2012-10-17'
+          PolicyName: !Sub ${AWS::StackName}-cleanup-${AWS::Region}-lambdaLogs
+        - PolicyDocument:
+            Statement:
+              - Action:
+                  - s3:PutObject
+                  - s3:DeleteObject
+                  - s3:List*
+                Effect: Allow
+                Resource:
+                  - !Sub arn:aws:s3:::${ArtifactStoreBucket}/*
+                  - !Sub arn:aws:s3:::${ArtifactStoreBucket}
+            Version: '2012-10-17'
+          PolicyName: !Sub ${AWS::StackName}-cleanup-${AWS::Region}-lambdaS3
+        - PolicyDocument:
+            Statement:
+              - Action:
+                  - ecr:ListImages
+                  - ecr:BatchDeleteImage
+                Effect: Allow
+                Resource: !GetAtt ECRepository.Arn
+            Version: '2012-10-17'
+          PolicyName: !Sub ${AWS::StackName}-cleanup-${AWS::Region}-lambdaECR
+      RoleName: !Sub ${AWS::StackName}-${AWS::Region}-AWSLambdaExecutionRole
+
+  ECRepositoryCustomResource:
+    Type: Custom::ECRepositoryCustomResource
+    Properties:
+      ServiceToken: !GetAtt AWSLambdaFunctionToClearECROnDelete.Arn
+      the_repository: !Ref ECRepository
+
+  AWSLambdaFunctionToClearECROnDelete:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      Description: "Work with ECR!"
+      FunctionName: !Sub 'clear-ecr-${AWS::StackName}'
+      Handler: index.handler
+      Role: !GetAtt AWSLambdaExecutionRole.Arn
+      Timeout: 360
+      Runtime: python3.9
+      Code:
+        ZipFile: |
+          import boto3
+          import cfnresponse
+          def handler(event, context):
+              # Init ...
+              the_event = event['RequestType']
+              print("The event is: ", str(the_event))
+              response_data = {}
+              ecr = boto3.client('ecr')
+              # Retrieve parameters
+              the_repository = event['ResourceProperties']['the_repository']
+              try:
+                  if the_event in ('Create', 'Update'):
+                      print("ECR Event for creation or update ", the_event)
+                  elif the_event == 'Delete':
+                      print("Deleting ECR content...")
+                      images = ecr.list_images(repositoryName=the_repository)
+                      imageIds = [id for id in images['imageIds']]
+                      if imageIds:
+                          ecr.batch_delete_image(repositoryName=the_repository,
+                                                 imageIds=imageIds)
+                  # Everything OK... send the signal back
+                  print("Operation successful!")
+                  cfnresponse.send(event,
+                                   context,
+                                   cfnresponse.SUCCESS,
+                                   response_data)
+              except Exception as e:
+                  print("OperatioECSClustern failed...")
+                  print(str(e))
+                  response_data['Data'] = str(e)
+                  cfnresponse.send(event,
+                                   context,
+                                   cfnresponse.FAILED,
+                                   response_data)
+  
+
+  PipelineRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: 
+                - codepipeline.amazonaws.com
+                - cloudformation.amazonaws.com
+            Action: 'sts:AssumeRole'
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AWSAppRunnerFullAccess
+        - arn:aws:iam::aws:policy/AWSCloudFormationFullAccess
+        - arn:aws:iam::aws:policy/service-role/AWSAppRunnerServicePolicyForECRAccess
+
+  CodePipelinePolicy:
+    Type: 'AWS::IAM::ManagedPolicy'
+    Properties:
+      Description: Policy with base permissions for CodePipeline
+      Path: /
+      Roles:
+        - !Ref PipelineRole
+      PolicyDocument:
+        Statement:
+          - Action:
+              - 's3:GetObject'
+              - 's3:GetObjectVersion'
+              - 's3:GetBucketVersioning'
+              - 's3:PutObject'
+              - "s3:GetBucketAcl"
+              - "s3:GetBucketLocation"
+            Resource:
+              - !GetAtt ArtifactStoreBucket.Arn
+              - !Sub "${ArtifactStoreBucket.Arn}/*"
+            Effect: Allow
+          - Action:
+              - 'iam:PassRole'
+              - "iam:GetRole"
+              - "iam:GetRolePolicy"
+              - "iam:PassRole"
+              - "iam:DetachRolePolicy"
+              - "iam:DeleteRolePolicy"
+              - "iam:DeleteRole"
+              - "iam:CreateRole"
+              - "iam:AttachRolePolicy"
+              - "iam:PutRolePolicy"
+            Resource: '*'
+            Effect: Allow
+          - Action:
+              - "codedeploy:CreateDeployment"
+              - "codedeploy:GetApplication"
+              - "codedeploy:GetApplicationRevision"
+              - "codedeploy:GetDeployment"
+              - "codedeploy:GetDeploymentConfig"
+              - "codedeploy:RegisterApplicationRevision"
+            Resource: '*'
+            Effect: Allow
+          - Action:
+              - 'codestar-connections:UseConnection'
+            Resource: '*'
+            Effect: Allow
+          - Action:
+              - "cloudformation:CreateStack"
+              - "cloudformation:DeleteStack"
+              - "cloudformation:DescribeStacks"
+              - "cloudformation:UpdateStack"
+              - "cloudformation:CreateChangeSet"
+              - "cloudformation:DeleteChangeSet"
+              - "cloudformation:DescribeChangeSet"
+              - "cloudformation:ExecuteChangeSet"
+              - "cloudformation:SetStackPolicy"
+              - "cloudformation:ValidateTemplate"
+            Resource: '*'
+            Effect: Allow
+          - Action:
+              - "lambda:InvokeFunction"
+              - "lambda:ListFunctions"
+            Resource: '*'
+            Effect: Allow
+          - Action:
+              - "opsworks:CreateDeployment"
+              - "opsworks:DescribeApps"
+              - "opsworks:DescribeCommands"
+              - "opsworks:DescribeDeployments"
+              - "opsworks:DescribeInstances"
+              - "opsworks:DescribeStacks"
+              - "opsworks:UpdateApp"
+              - "opsworks:UpdateStack"
+            Resource: '*'
+            Effect: Allow
+          - Action:
+              - "elasticbeanstalk:*"
+              - "ec2:*"
+              - "elasticloadbalancing:*"
+              - "autoscaling:*"
+              - "cloudwatch:*"
+              - "s3:*"
+              - "sns:*"
+              - "cloudformation:*"
+              - "rds:*"
+              - "sqs:*"
+              - "ecs:*"
+            Resource: '*'
+            Effect: Allow
+          - Action:
+              - "codecommit:CancelUploadArchive"
+              - "codecommit:GetBranch"
+              - "codecommit:GetCommit"
+              - "codecommit:GetRepository"
+              - "codecommit:GetUploadArchiveStatus"
+              - "codecommit:UploadArchive"
+            Resource: '*'
+            Effect: Allow
+          - Action:
+              - 'codebuild:BatchGetBuilds'
+              - 'codebuild:StartBuild'
+              - "codebuild:BatchGetBuildBatches"
+              - "codebuild:StartBuildBatch"
+              - "ecr:DescribeImages"
+            Resource: '*'
+            Effect: Allow
+          - Action:
+              - 'kms:Encrypt'
+              - 'kms:Decrypt'
+              - 'kms:ReEncrypt*'
+              - 'kms:GenerateDataKey*'
+              - 'kms:DescribeKey'
+            Resource: !GetAtt KMSKey.Arn
+            Effect: Allow
+        Version: 2012-10-17
+
+  CodeBuildRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+            Action: 'sts:AssumeRole'
+      Path: /
+
+  CodeBuildPolicy:
+    Type: 'AWS::IAM::ManagedPolicy'
+    Properties:
+      Description: Policy with base permissions for CodeBuild
+      Path: /
+      Roles:
+        - !Ref CodeBuildRole
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - "logs:CreateLogGroup"
+              - "logs:PutLogEvents"
+              - "logs:CreateLogStream"
+            Resource:
+              - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/*"
+          - Effect: Allow
+            Action:
+              - 's3:GetObject'
+              - 's3:GetObjectVersion'
+              - 's3:GetBucketVersioning'
+              - 's3:PutObject'
+              - "s3:GetBucketAcl"
+              - "s3:GetBucketLocation"
+            Resource:
+              - !GetAtt ArtifactStoreBucket.Arn
+              - !Sub "${ArtifactStoreBucket.Arn}/*"
+          - Effect: Allow
+            Action:
+              - 'kms:Encrypt'
+              - 'kms:Decrypt'
+              - 'kms:ReEncrypt*'
+              - 'kms:GenerateDataKey*'
+              - 'kms:DescribeKey'
+            Resource: !GetAtt KMSKey.Arn
+          - Effect: Allow  #For allowing CodeBuild to Access Secrets Manager to retrieve Private SSH key. If a custom KMS key is used, please add the ARN in the Resource section
+            Action:
+              - 'kms:Encrypt'
+              - 'kms:Decrypt'
+              - 'kms:ReEncrypt*'
+              - 'kms:GenerateDataKey*'
+              - 'kms:DescribeKey'
+            Resource: !Sub "arn:aws:kms:${AWS::Region}:${AWS::AccountId}:alias/aws/secretsmanager"
+          - Effect: Allow
+            Action:
+              - 'ecr:GetAuthorizationToken'
+              - 'ecr:BatchCheckLayerAvailability'
+              - 'ecr:GetDownloadUrlForLayer'
+              - 'ecr:BatchGetImage'
+              - 'ecr:InitiateLayerUpload'
+              - 'ecr:UploadLayerPart'
+              - 'ecr:CompleteLayerUpload'
+              - 'ecr:PutImage'
+            Resource: '*'
+
+  CodeBuild:
+    Type: 'AWS::CodeBuild::Project'
+    Properties:
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:4.0
+        Type: LINUX_CONTAINER
+        PrivilegedMode: true
+        EnvironmentVariables:
+          - Name: AWS_ACCOUNT_ID
+            Value: !Ref AWS::AccountId
+            Type: PLAINTEXT
+          - Name: AWS_REGION
+            Value: !Ref AWS::Region
+            Type: PLAINTEXT
+          - Name: IMAGE_REPO_NAME
+            Value: !Ref ImageRepositoryName
+            Type: PLAINTEXT
+      ServiceRole: !Ref CodeBuildRole
+      Source:
+        Type: CODEPIPELINE
+
+  Pipeline:
+    Type: 'AWS::CodePipeline::Pipeline'
+    DependsOn: ECRepository
+    Properties:
+      ArtifactStore:
+        Type: S3
+        Location: !Ref ArtifactStoreBucket
+        EncryptionKey:
+          Id: !GetAtt KMSKey.Arn
+          Type: KMS
+      Name: !Sub ${ImageRepositoryName}-Pipeline
+      RoleArn: !GetAtt PipelineRole.Arn
+      Stages:
+        - Name: 'Source'
+          Actions:
+            - Name: 'Source'
+              Namespace: 'SourceVariables'
+              ActionTypeId:
+                Category: 'Source'
+                Owner: 'AWS'
+                Version: '1'
+                Provider: 'CodeStarSourceConnection'
+              OutputArtifacts:
+                - Name: SourceArtifact
+              Configuration:
+                ConnectionArn: !Ref CodeStarConnectionARN
+                FullRepositoryId: !Ref RepositoryName
+                BranchName: !Ref Branch
+                DetectChanges: true
+        - Name: 'Build'
+          Actions:
+            - Name: 'CodeBuild'
+              ActionTypeId:
+                Category: 'Build'
+                Owner: 'AWS'
+                Version: '1'
+                Provider: 'CodeBuild'
+              InputArtifacts:
+                - Name: SourceArtifact
+              OutputArtifacts:
+                - Name: BuildArtifact
+              Configuration:
+                ProjectName: !Ref CodeBuild
+                EnvironmentVariables: '[{"name":"CODEPIPELINE_BRANCH","value":"#{SourceVariables.BranchName}","type":"PLAINTEXT"}]'
+              RunOrder: 1
+        - Name: 'Deploy'
+          Actions:
+            - ActionTypeId:
+                  Category: Deploy
+                  Owner: AWS
+                  Provider: CloudFormation
+                  Version: 1
+              Name: Deploy
+              InputArtifacts:
+                - Name: SourceArtifact
+                - Name: BuildArtifact
+              Configuration:
+                ActionMode: CREATE_UPDATE
+                Capabilities: CAPABILITY_IAM
+                RoleArn: !GetAtt PipelineRole.Arn
+                StackName: !Sub ${ImageRepositoryName}-AppRunner-Stack
+                TemplatePath: SourceArtifact::.cloudformation/appRunnerStack.yaml
+                TemplateConfiguration: BuildArtifact::.cloudformation/appRunnerStack.json
+              RunOrder: 1
