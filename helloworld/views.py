@@ -1,4 +1,6 @@
 from django.http import HttpResponse
+import os
 
 def index(request):
-    return HttpResponse("Hello, world!")
+    # Get env variable NAME
+    return HttpResponse("Hello, world! " + os.getenv('NAME', 'No name set'))

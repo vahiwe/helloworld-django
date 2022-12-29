@@ -1,0 +1,35 @@
+version: 0.2
+
+env:
+  variables:
+    TAG: latest
+phases:
+  install:
+    commands:
+      - echo Phase 1/4 - Install started on `date`
+  pre_build:
+    commands:
+      - echo Phase 2/4 - Pre-Build started on `date`
+      - echo   + Logging in to Amazon ECR...
+      - AWS_REGION=${AWS_REGION:-us-east-1}
+      - IMAGE_REPO_NAME=${IMAGE_REPO_NAME:-testing}
+      - IMAGE_TAG=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c 1-7)
+      - IMAGE_TAG=${IMAGE_TAG:-$TAG}
+      - echo   + AWS_REGION=$AWS_REGION
+      - echo   + IMAGE_TAG=$IMAGE_TAG
+      - AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query 'Account' --output=text)
+      - echo   + AWS_ACCOUNT_ID=$AWS_ACCOUNT_ID
+      - aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
+      - echo   + AWS_REGION=$AWS_REGION
+  build:
+    commands:
+      - echo Phase 3/4 - Build started on `date`
+      - echo   + Building Docker image...
+      - docker build -t $IMAGE_REPO_NAME:$IMAGE_TAG .
+      - docker tag $IMAGE_REPO_NAME:$IMAGE_TAG $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$IMAGE_REPO_NAME:$IMAGE_TAG
+  post_build:
+    commands:
+      - echo Phase 4/4 - Post-Build started on `date`
+      - echo   + Pushing Docker image...
+      - docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$IMAGE_REPO_NAME:$IMAGE_TAG
+      - echo   + Done!!!
