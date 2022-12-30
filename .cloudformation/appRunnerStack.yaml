@@ -1,18 +1,32 @@
 AWSTemplateFormatVersion: "2010-09-09"
-Description: App Runner Template for WebApp
+Description: Stack for AppRunner
 
 Parameters:
-  WebAppPort:
+  ServiceName:
+    Type: String
+    Description: Name of the AppRunner Service
+    Default: WebApp
+  AppPort:
     Type: Number
-    Description: The Port that NodeJS API listening on
+    Description: The Port that the app will be listening on
     Default: 80
   ContainerImage:
     Type: String
-    Description: container image
+    Description: container image uri
   ImageRepositoryType:
     Type: String
     Description: Type of the repository
     Default: ECR
+  # Default values for Cpu and Memory are based on the AppRunner documentation
+  # https://docs.aws.amazon.com/apprunner/latest/api/API_InstanceConfiguration.html
+  Cpu:
+    Type: Number
+    Description: The CPU that the app will be using
+    Default: 1
+  Memory:
+    Type: Number
+    Description: The Memory that the app will be using
+    Default: 2
 
 Conditions:
   NeedsAccessRole:
@@ -45,10 +59,10 @@ Resources:
               Service: tasks.apprunner.amazonaws.com
             Action: 'sts:AssumeRole'
 
-  WebApp:
+  App:
     Type: AWS::AppRunner::Service
     Properties:
-      ServiceName: WebApp
+      ServiceName: !Ref ServiceName
       SourceConfiguration:
         AuthenticationConfiguration: !If
           - NeedsAccessRole
@@ -59,21 +73,18 @@ Resources:
           ImageIdentifier: !Ref ContainerImage
           ImageRepositoryType: !Ref ImageRepositoryType
           ImageConfiguration:
-            Port: !Ref WebAppPort
-            RuntimeEnvironmentVariables:
-              - Name: Name
-                Value: "WebApp"
+            Port: !Ref AppPort
       InstanceConfiguration:
-        Cpu: 1 vCPU
-        Memory: 2 GB
+        Cpu: !Sub ${Cpu} vCPU
+        Memory: !Sub ${Memory} GB
         
 Outputs:
   AppRunnerServiceArn:
     Description: ServiceArn of GitHub
-    Value: !GetAtt WebApp.ServiceArn
+    Value: !GetAtt App.ServiceArn
   AppRunnerServiceId:
     Description: AppRunnerServiceId
-    Value: !GetAtt WebApp.ServiceId
+    Value: !GetAtt App.ServiceId
   AppRunnerServiceUrl:
     Description: AppRunnerServiceUrl
-    Value: !GetAtt WebApp.ServiceUrl
+    Value: !GetAtt App.ServiceUrl
