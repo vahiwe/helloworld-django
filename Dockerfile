@@ -24,6 +24,9 @@ WORKDIR /app
 # Install any needed packages specified in requirements.txt
 RUN pip install -r requirements.txt
 
+# Copy env file
+COPY .env /app
+
 # Run to create migrations for changes
 # RUN python manage.py makemigrations
 

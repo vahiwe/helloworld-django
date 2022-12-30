@@ -27,6 +27,12 @@ Parameters:
     AllowedPattern: "[a-z0-9]+"
     Default: 'testing'
     ConstraintDescription: Must be the name of a repository. e.g. user/repo
+  ParameterStorePath:
+    Type: String
+    Description: 'Parameter Store Path'
+    AllowedPattern: ".+"
+    Default: '/prod/api'
+    ConstraintDescription: Must be the path of a parameter store. e.g. /path/to/parameters
 
 #------------------------
 #   RESOURCES
@@ -431,6 +437,12 @@ Resources:
               - 'ecr:CompleteLayerUpload'
               - 'ecr:PutImage'
             Resource: '*'
+          - Effect: Allow
+            Action:
+              - 'ssm:GetParameter'
+              - 'ssm:GetParameters'
+              - 'ssm:GetParametersByPath'
+            Resource: '*'
 
   CodeBuild:
     Type: 'AWS::CodeBuild::Project'
@@ -451,6 +463,9 @@ Resources:
             Type: PLAINTEXT
           - Name: IMAGE_REPO_NAME
             Value: !Ref ImageRepositoryName
+            Type: PLAINTEXT
+          - Name: PARAMETER_STORE_PATH
+            Value: !Ref ParameterStorePath
             Type: PLAINTEXT
       ServiceRole: !Ref CodeBuildRole
       Source:
